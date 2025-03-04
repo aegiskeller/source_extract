@@ -1,2 +1,2 @@
-# source_extract
-Runs source extractor on an image
+# Radio_Phot
+Performs stellar photometry on a image
