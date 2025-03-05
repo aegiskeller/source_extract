@@ -19,24 +19,27 @@ def getDSSImage(ra, dec, size):
     images = SkyView.get_images(position=f'{ra} {dec}', survey='DSS', coordinates='J2000', pixels=size)
     # get the data from the image
     data = images[0][0].data
-    # create a new figure
-    plt.figure()
-    # display the image
-    plt.imshow(data, cmap='gray')
     # save the image in a file
     filename = 'DSSImage.fits'
     fits.writeto(filename, data, overwrite=True)
     # return the name of the file
     return filename
 
-# test the function by obtaining an image of NGC 330
-ra = 10.721
-dec = -72.080
-size = 512
-filename = getDSSImage(ra, dec, size)
-print(f'The image was saved in the file {filename}')
-# save the resulting plot as a png file
-plt.savefig('DSSImage.png')
+# define a function to display the image
+def displayImage(filename):
+    # open the image file
+    hdul = fits.open(filename)
+    # get the data from the image
+    data = hdul[0].data
+    # display the image
+    plt.imshow(data, origin='lower', cmap='gray')
+    plt.show()
+    # save the image in a png file
+    # append .png to the filename
+    pngfile = filename + '.png'
+    plt.imsave(pngfile, data, cmap='gray')
+    # close the image file
+    hdul.close()
 
 #a function to proint the image header for an image
 def printImageHeader(filename):
@@ -46,3 +49,12 @@ def printImageHeader(filename):
     print(hdul[0].header)
     #close the image file
     hdul.close()
+
+# a function to run astrometry.net on an image
+def runAstrometry(filename):
+    # run astrometry.net on the image
+    os.system(f'solve-field --guess-scale -D solver-output --no-plots --overwrite {filename}')
+    # get the name of the new image
+    newfile = filename.replace('.fits', '-wcs.fits')
+    # return the name of the new image
+    return newfile
