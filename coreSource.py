@@ -52,9 +52,18 @@ def printImageHeader(filename):
 
 # a function to run astrometry.net on an image
 def runAstrometry(filename):
+    # create a uniquely named directory by selecting a random string
+    import random
+    import string
+    random_string = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    # create the directory  
+    os.mkdir(f'{random_string}')
     # run astrometry.net on the image
-    os.system(f'solve-field --guess-scale -D solver-output --no-plots --overwrite {filename}')
+    os.system(f'solve-field --guess-scale -D {random_string} --no-plots --overwrite {filename}')
     # get the name of the new image
-    newfile = filename.replace('.fits', '-wcs.fits')
+    newfile = filename.replace('.fits', '.new')
     # return the name of the new image
-    return newfile
+    os.rename(f'{random_string}/{newfile}', newfile.replace('.new', '_solved.fits'))
+    # remove the directory
+    os.rmdir(f'{random_string}')
+    return ()
