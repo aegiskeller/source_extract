@@ -11,9 +11,16 @@
 from astroquery.skyview import SkyView
 from astropy.io import fits
 from astroquery.vizier import Vizier
+from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
+from astropy.stats import SigmaClip
+from photutils.background import Background2D, MedianBackground
+from photutils.aperture import CircularAperture
+from photutils.aperture import aperture_photometry
+from photutils.profiles import CurveOfGrowth
 import astropy.units as u
 import matplotlib.pyplot as plt
+import numpy as np
 import random
 import string
 import os
@@ -136,3 +143,94 @@ def getUCAC4Objects(filename):
         return ucac4_df
     else:
         return 'No objects found'
+
+ 
+def removeBackground(filename):
+    """
+    a function that fits a background to the image
+    and removes it. This is required prior to aperture photometry
+    """
+    sigma_clip = SigmaClip(sigma=3.0)
+    bkg_estimator = MedianBackground()
+    try:
+        hdul = fits.open(filename)
+        data = hdul[0].data 
+        bkg = Background2D(data, (50, 50), filter_size=(3, 3), sigma_clip=sigma_clip, bkg_estimator=bkg_estimator)
+        data_nobkg = data - bkg.background
+        hdul[0].data = data_nobkg
+        hdul.writeto(filename.replace('.fits', '_nobkg.fits'), overwrite=True)
+        hdul.close()
+    except Exception as e:
+        print(f'Error: {e}')
+        hdul.close()
+        return 'failed'
+    return 'success'
+
+#create a function to perform curve of growth analysis
+def curveOfGrowth(ucac4_df, filename):
+    """
+    a function to project the ra,dec of ucac4_df to the image
+    coordinates (x,y) and perform curve of growth analysis
+    """
+    # open the image file to get the WCS information
+    try:
+        hdul = fits.open(filename)
+        wcs = WCS(hdul[0].header)
+    except Exception as e:
+        print(f'Error: {e}')
+        hdul.close()
+        return 'failed - no WCS info'
+    
+    # Create a SkyCoord object for the objects in the catalog
+    ucac4_coords = SkyCoord(ra=ucac4_df['RAJ2000'], dec=ucac4_df['DEJ2000'], unit=(u.deg, u.deg), frame='icrs')
+    
+    # Project the coordinates to the image
+    x, y = wcs.world_to_pixel(ucac4_coords)
+    ucac4_df['x'] = x
+    ucac4_df['y'] = y
+    # generate an aperture for each object
+    positions = list(zip(x, y))
+    cog = CurveOfGrowth(hdul[0].data, positions, radii=np.arange(1, 35, 1))
+    # normalise the curve of growth
+    cog.normalize(method='max')
+    # option to create a plot of the curve of growth using matplotlib
+    # and save to a png file
+    cog.plot()
+    plt.savefig('curve_of_growth.png')
+    plt.close()
+
+
+    # now determine the best apertures
+    ee_vals = [0.9, 0.99]
+    photAp, skyApInner = cog.calc_radius_at_ee(ee_vals)
+    skyApOuter = skyApInner + 5
+    hdul.close()
+    return photAp, skyApInner, skyApOuter
+
+def doPhotometry(ucac4_df, filename):
+    """
+    a function to project the ra,dec of ucac4_df to the image
+    coordinates (x,y) and perform aperture photometry
+    """
+    # open the image file to get the WCS information
+    try:
+        hdul = fits.open(filename)
+        wcs = WCS(hdul[0].header)
+    except Exception as e:
+        print(f'Error: {e}')
+        hdul.close()
+        return 'failed - no WCS info'
+    
+    # Create a SkyCoord object for the objects in the catalog
+    ucac4_coords = SkyCoord(ra=ucac4_df['RAJ2000'], dec=ucac4_df['DEJ2000'], unit=(u.deg, u.deg), frame='icrs')
+    
+    # Project the coordinates to the image
+    x, y = wcs.world_to_pixel(ucac4_coords)
+    ucac4_df['x'] = x
+    ucac4_df['y'] = y
+    # generate an aperture for each object
+    positions = list(zip(x, y))
+    aperture = CircularAperture(positions, r=4.0)
+    phot_table = aperture_photometry(hdul[0].data, aperture)
+    hdul.close()
+    return phot_table
