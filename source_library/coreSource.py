@@ -190,7 +190,15 @@ def curveOfGrowth(ucac4_df, filename):
     ucac4_df['y'] = y
     # generate an aperture for each object
     positions = list(zip(x, y))
-    cog = CurveOfGrowth(hdul[0].data, positions, radii=np.arange(1, 35, 1))
+    # this could be quite fragile, need to check the radii
+    # as these vary depending on the image and pixel scale
+    # obtain the header keyword for pixscale
+    pixscale = float(wcsinfo(filename)[2])
+    if pixscale > 1.0:
+        radii = np.arange(1.5, 8, 0.5)
+    else:
+        radii = np.arange(3, 15, 1)
+    cog = CurveOfGrowth(hdul[0].data, positions, radii=radii)
     # normalise the curve of growth
     cog.normalize(method='max')
     # option to create a plot of the curve of growth using matplotlib
@@ -198,8 +206,6 @@ def curveOfGrowth(ucac4_df, filename):
     cog.plot()
     plt.savefig('curve_of_growth.png')
     plt.close()
-
-
     # now determine the best apertures
     ee_vals = [0.9, 0.99]
     photAp, skyApInner = cog.calc_radius_at_ee(ee_vals)
