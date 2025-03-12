@@ -15,7 +15,7 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from astropy.stats import SigmaClip
 from photutils.background import Background2D, MedianBackground
-from photutils.aperture import CircularAperture
+from photutils.aperture import CircularAperture, CircularAnnulus
 from photutils.aperture import aperture_photometry
 from photutils.profiles import CurveOfGrowth
 import astropy.units as u
@@ -229,14 +229,23 @@ def doPhotometry(ucac4_df, filename):
     
     # Create a SkyCoord object for the objects in the catalog
     ucac4_coords = SkyCoord(ra=ucac4_df['RAJ2000'], dec=ucac4_df['DEJ2000'], unit=(u.deg, u.deg), frame='icrs')
-    
+    # use the curveofgrowth function to determine the best apertures
+    photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
+
     # Project the coordinates to the image
     x, y = wcs.world_to_pixel(ucac4_coords)
     ucac4_df['x'] = x
     ucac4_df['y'] = y
     # generate an aperture for each object
     positions = list(zip(x, y))
-    aperture = CircularAperture(positions, r=4.0)
+    aperture = CircularAperture(positions, r=photAp)
+    # use a circular annulus for the background
+    annulus_aperture = CircularAnnulus(positions, r_in=skyApInner, r_out=skyApOuter)
+    # perform aperture photometry on the targets
     phot_table = aperture_photometry(hdul[0].data, aperture)
+    # perform aperture photometry on the background
+    bkg_table = aperture_photometry(hdul[0].data, annulus_aperture)
+    #subtract the background from the photometry of the targets
+    phot_table['aperture_sum'] = phot_table['aperture_sum'] - bkg_table['aperture_sum'] * (photAp/skyApInner)**2
     hdul.close()
     return phot_table
