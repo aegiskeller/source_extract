@@ -18,6 +18,7 @@ from photutils.background import Background2D, MedianBackground
 from photutils.aperture import CircularAperture, CircularAnnulus
 from photutils.aperture import aperture_photometry
 from photutils.profiles import CurveOfGrowth
+from photutils.aperture import ApertureStats
 import astropy.units as u
 import matplotlib.pyplot as plt
 import numpy as np
@@ -222,6 +223,7 @@ def doPhotometry(ucac4_df, filename):
     try:
         hdul = fits.open(filename)
         wcs = WCS(hdul[0].header)
+        data = hdul[0].data
     except Exception as e:
         print(f'Error: {e}')
         hdul.close()
@@ -234,18 +236,22 @@ def doPhotometry(ucac4_df, filename):
 
     # Project the coordinates to the image
     x, y = wcs.world_to_pixel(ucac4_coords)
-    ucac4_df['x'] = x
-    ucac4_df['y'] = y
     # generate an aperture for each object
     positions = list(zip(x, y))
-    aperture = CircularAperture(positions, r=photAp)
+    #get the apertures from curveofgrowth
+    photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
+
+    apertures = CircularAperture(positions, r=photAp)
     # use a circular annulus for the background
-    annulus_aperture = CircularAnnulus(positions, r_in=skyApInner, r_out=skyApOuter)
-    # perform aperture photometry on the targets
-    phot_table = aperture_photometry(hdul[0].data, aperture)
-    # perform aperture photometry on the background
-    bkg_table = aperture_photometry(hdul[0].data, annulus_aperture)
-    #subtract the background from the photometry of the targets
-    phot_table['aperture_sum'] = phot_table['aperture_sum'] - bkg_table['aperture_sum'] * (photAp/skyApInner)**2
-    hdul.close()
+    annulus_apertures = CircularAnnulus(positions, r_in=skyApInner, r_out=skyApOuter)
+    aperstats = ApertureStats(data, annulus_apertures)
+    bkg_mean = aperstats.mean
+
+    # perform the photometry in the circular aperture
+    phot_table = aperture_photometry(data, apertures)
+    #the area of the aperture
+    aperture_area = np.pi * photAp**2
+    #subtract the background
+    phot_bkgsub = phot_table['aperture_sum'] - bkg_mean * aperture_area
+    phot_table['aperture_sum_bkgsub'] = phot_bkgsub
     return phot_table

@@ -187,3 +187,4 @@ cython_debug/
 *.solved
 *.wcs
 *.new
+tester.py
