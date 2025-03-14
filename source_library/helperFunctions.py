@@ -1,9 +1,10 @@
 import astropy.io.fits as fits
 import sqlite3
 
+
 # create a function that prints the contents of a fits table
 def printTable(filename):
-     # open the table file
+    # open the table file
     hdul = fits.open(filename)
     # print the header
     print(hdul[0].header)
@@ -12,11 +13,13 @@ def printTable(filename):
     # close the table file
     hdul.close()
 
+
 # create or connect to a SQLite database
 def connect_to_db(db_name):
     """Connect to the SQLite database and return the connection object."""
     conn = sqlite3.connect(db_name)
     return conn
+
 
 def create_table(conn, create_table_sql):
     """Create a table from the create_table_sql statement."""
@@ -25,6 +28,7 @@ def create_table(conn, create_table_sql):
         c.execute(create_table_sql)
     except Exception as e:
         print(e)
+
 
 # a function to create a table 'wcs' in the database
 def create_wcs_table(conn):
@@ -42,3 +46,13 @@ def create_wcs_table(conn):
           fieldunits text NOT NULL
     );"""
     create_table(conn, sql)
+
+
+def resolve_coordinates(target):
+    """Resolve the coordinates of a target using the SIMBAD service."""
+    from astroquery.simbad import Simbad
+
+    result_table = Simbad.query_object(target)
+    ra = result_table["RA"][0]
+    dec = result_table["DEC"][0]
+    return ra, dec

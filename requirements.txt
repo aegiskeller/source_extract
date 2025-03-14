@@ -1,3 +1,8 @@
 astroquery
 astropy
 photutils
+numpy
+matplotlib
+pytest
+pytest-cov
+black

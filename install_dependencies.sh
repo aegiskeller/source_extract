@@ -8,6 +8,11 @@ sudo apt-get install -y astrometry.net
 # it could be the case we need to install more index files
 # sudo apt-get install astrometry-data-tycho2
 # the 4000 series index files
+# check if ths directory /usr/share/astrometry exists
+# if not create it
+if [ ! -d /usr/share/astrometry ]; then
+    sudo mkdir /usr/share/astrometry
+fi
 cd /usr/share/astrometry
 for ((i=7; i<20; i++)); do
     I=$(printf %02i $i)

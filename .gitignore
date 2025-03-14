@@ -188,3 +188,6 @@ cython_debug/
 *.wcs
 *.new
 tester.py
+furryroad/
+astrometry.net*/
+astrometry.net*
