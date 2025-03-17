@@ -90,10 +90,12 @@ def runAstrometry(filename):
         os.system(f"solve-field --guess-scale --no-plots -D {random_string} {filename}")
         duration = time.time() - start_time
         print(f"Astrometry.net ran in {duration} seconds")
-        # get the name of the new image
-        newfile = filename.replace(".fits", ".new")
+        # create the filename of the new solved image
+        # this is <base name> +'.new'
+        # split the filename on '.'
+        newfile = filename.split(".")[0]+".new"
         # move the file up a directory
-        shutil.move(f"{random_string}/{newfile.replace('.new', '_solved.fits')}", f"../{newfile.replace('.new', '_solved.fits')}")
+        shutil.move(f"{random_string}/{newfile}", f"./{newfile.replace('.new', '_solved.fits')}")
         # remove the directory
         shutil.rmtree(f"{random_string}")
     except Exception as e:

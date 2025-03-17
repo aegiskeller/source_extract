@@ -53,6 +53,11 @@ def resolve_coordinates(target):
     from astroquery.simbad import Simbad
 
     result_table = Simbad.query_object(target)
-    ra = result_table["RA"][0]
-    dec = result_table["DEC"][0]
+    # sometimes the result_table has 'RA' sometimes 'ra'
+    if "RA" not in result_table.colnames:
+        ra = result_table["ra"][0]
+        dec = result_table["dec"][0]
+    else:
+        ra = result_table["RA"][0]
+        dec = result_table["DEC"][0]
     return ra, dec

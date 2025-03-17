@@ -1,4 +1,4 @@
-from source_library.coreSource import getDSSImage
+from source_library.coreSource import getDSSImage, runAstrometry, wcsinfo
 from source_library.helperFunctions import resolve_coordinates
 from source_library.helperFunctions import printTable
 import os
@@ -12,7 +12,10 @@ def test_hello_world():
 
 def test_resolve_coordinates():
     target = "NGC330"
-    assert resolve_coordinates(target) == ('00 56 18.55', '-72 27 45.1')
+    # check that the return is correct to 5 decimal places
+    result = resolve_coordinates(target)
+    assert round(result[0], 5) == 14.07729
+    assert round(result[1], 5) == -72.46253
 
 def test_getDSSImage():
     ra = '00 56 18.55'
@@ -29,5 +32,12 @@ def test_runAstrometry():
     #check that the return has 'success' contained in it
     assert runAstrometry(filename).find('success') != -1
      
-
-    
+def test_wcsinfo():
+    # check that the return is correct to 5 decimal places
+    filename = "./input-image_solved.fits"
+    result = wcsinfo(filename)
+    assert round(float(result[0]), 5) == 214.89098
+    assert round(float(result[1]), 5) == 18.68767
+    assert round(float(result[2]), 5) == 90.67857
+    assert round(float(result[3]), 5) == -139.35448
+    assert round(float(result[4]), 1) == 33.4
