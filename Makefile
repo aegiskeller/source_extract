@@ -5,6 +5,9 @@ install:
 install-astrometry:
 	./install_dependencies.sh
 
+install-indexfiles:
+	./install_indexfiles.sh
+
 test:
 	python -m pytest -vv tests/test_main.py
 

@@ -92,8 +92,8 @@ def runAstrometry(filename):
         print(f"Astrometry.net ran in {duration} seconds")
         # get the name of the new image
         newfile = filename.replace(".fits", ".new")
-        # return the name of the new image
-        os.rename(f"{random_string}/{newfile}", newfile.replace(".new", "_solved.fits"))
+        # move the file up a directory
+        shutil.move(f"{random_string}/{newfile.replace('.new', '_solved.fits')}", f"../{newfile.replace('.new', '_solved.fits')}")
         # remove the directory
         shutil.rmtree(f"{random_string}")
     except Exception as e:
