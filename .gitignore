@@ -191,3 +191,5 @@ tester.py
 furryroad/
 astrometry.net*/
 astrometry.net*
+*.fits
+*.FITS

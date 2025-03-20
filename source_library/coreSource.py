@@ -22,12 +22,36 @@ from photutils.aperture import ApertureStats
 import astropy.units as u
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import random
 import string
 import os
 import shutil
 import time
+import logging
 
+logger = None
+def set_logger(external_logger):
+    global logger
+    logger = external_logger
+
+def create_logger():
+    # create a logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    # create a file handler
+    handler = logging.FileHandler("coreSource.log")
+    handler.setLevel(logging.DEBUG)
+    # create a logging format
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    # add the handler to the logger
+    logger.addHandler(handler)  # add the handler to the logger
+    # also handle the logging to the console
+    consoleHandler = logging.StreamHandler()
+    consoleHandler.setFormatter(formatter)
+    logger.addHandler(consoleHandler)
+    return logger
 
 # define the function getDSSImage
 def getDSSImage(ra, dec, size):
@@ -73,7 +97,7 @@ def printImageHeader(filename):
     # open the image file
     hdul = fits.open(filename)
     # print the header
-    print(hdul[0].header)
+    logger.debug(hdul[0].header)
     # close the image file
     hdul.close()
 
@@ -87,9 +111,10 @@ def runAstrometry(filename):
         os.mkdir(f"{random_string}")
         # run astrometry.net on the image
         start_time = time.time()
-        os.system(f"solve-field --guess-scale --no-plots -D {random_string} {filename}")
+        #os.system(f"solve-field --guess-scale --no-plots -D {random_string} {filename}")
+        os.system(f"solve-field -D {random_string} {filename}")
         duration = time.time() - start_time
-        print(f"Astrometry.net ran in {duration} seconds")
+        logger.info(f"Astrometry.net ran in {duration} seconds")
         # create the filename of the new solved image
         # this is <base name> +'.new'
         # split the filename on '.'
@@ -99,7 +124,9 @@ def runAstrometry(filename):
         # remove the directory
         shutil.rmtree(f"{random_string}")
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
+        # remove the directory and contents
+        shutil.rmtree(f"{random_string}")
         return "failed"
     return f"success-{duration}"
 
@@ -111,7 +138,7 @@ def wcsinfo(filename):
     try:
         wcsinfo_output = os.popen(f"wcsinfo {filename}").read()
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return "failed"
     # extract the values from the output
     wcsinfo_output = wcsinfo_output.split("\n")
@@ -140,7 +167,7 @@ def getUCAC4Objects(filename):
             wcsinfo(filename)
         )
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         return "failed - no wcs info"
 
     # Create a SkyCoord object for the center of the field
@@ -158,10 +185,29 @@ def getUCAC4Objects(filename):
     if result:
         ucac4_table = result[0]
         ucac4_df = ucac4_table.to_pandas()
-        # drop rows with missing Vmag
-        ucac4_df = ucac4_df.dropna(subset=["Vmag"])
+        # drop rows with missing Vmag - too restrictive?
+        # ucac4_df = ucac4_df.dropna(subset=["Vmag"])
         # drop rows with bad object quality
         ucac4_df = ucac4_df[ucac4_df["of"] == 0]
+        # open the image file to get the WCS information
+        try:
+            hdul = fits.open(filename)
+            wcs = WCS(hdul[0].header)
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            hdul.close()
+            return "failed - no WCS info"
+        # Create a SkyCoord object for the objects in the catalog
+        ucac4_coords = SkyCoord(
+            ra=ucac4_df["RAJ2000"],
+            dec=ucac4_df["DEJ2000"],
+            unit=(u.deg, u.deg),
+            frame="icrs",
+        )
+        # Project the coordinates to the image
+        x, y = wcs.world_to_pixel(ucac4_coords)
+        ucac4_df["x"] = x
+        ucac4_df["y"] = y
         return ucac4_df
     else:
         return "No objects found"
@@ -189,7 +235,7 @@ def removeBackground(filename):
         hdul.writeto(filename.replace(".fits", "_nobkg.fits"), overwrite=True)
         hdul.close()
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         hdul.close()
         return "failed"
     return "success"
@@ -201,29 +247,21 @@ def curveOfGrowth(ucac4_df, filename):
     a function to project the ra,dec of ucac4_df to the image
     coordinates (x,y) and perform curve of growth analysis
     """
-    # open the image file to get the WCS information
-    try:
-        hdul = fits.open(filename)
-        wcs = WCS(hdul[0].header)
-    except Exception as e:
-        print(f"Error: {e}")
+    # generate an aperture for each object in ucac4_df[x,y]
+    x = ucac4_df["x"]
+    y = ucac4_df["y"]
+    hdul = fits.open(filename)
+    # check that hdul[0].data is not None
+    if hdul[0].data is None:
         hdul.close()
-        return "failed - no WCS info"
-
-    # Create a SkyCoord object for the objects in the catalog
-    ucac4_coords = SkyCoord(
-        ra=ucac4_df["RAJ2000"],
-        dec=ucac4_df["DEJ2000"],
-        unit=(u.deg, u.deg),
-        frame="icrs",
-    )
-
-    # Project the coordinates to the image
-    x, y = wcs.world_to_pixel(ucac4_coords)
-    ucac4_df["x"] = x
-    ucac4_df["y"] = y
-    # generate an aperture for each object
+        return "failed - no image data"
     positions = list(zip(x, y))
+    # screen out objects with x,y outside the image
+    # either greater than the image extent in x,y or
+    # less than zero
+    x_max, y_max = hdul[0].data.shape
+    positions = [pos for pos in positions if pos[0] < x_max and pos[1] < y_max]
+    positions = [pos for pos in positions if pos[0] > 0 and pos[1] > 0]
     # this could be quite fragile, need to check the radii
     # as these vary depending on the image and pixel scale
     # obtain the header keyword for pixscale
@@ -232,6 +270,7 @@ def curveOfGrowth(ucac4_df, filename):
         radii = np.arange(1.5, 8, 0.5)
     else:
         radii = np.arange(3, 15, 1)
+    # create a curve of growth object
     cog = CurveOfGrowth(hdul[0].data, positions, radii=radii)
     # normalise the curve of growth
     cog.normalize(method="max")
@@ -263,20 +302,19 @@ def doPhotometry(ucac4_df, filename):
         hdul.close()
         return "failed - no WCS info"
 
-    # Create a SkyCoord object for the objects in the catalog
-    ucac4_coords = SkyCoord(
-        ra=ucac4_df["RAJ2000"],
-        dec=ucac4_df["DEJ2000"],
-        unit=(u.deg, u.deg),
-        frame="icrs",
-    )
     # use the curveofgrowth function to determine the best apertures
     photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
 
     # Project the coordinates to the image
-    x, y = wcs.world_to_pixel(ucac4_coords)
+    x, y = ucac4_df["x"], ucac4_df["y"]
     # generate an aperture for each object
     positions = list(zip(x, y))
+    # screen out objects with x,y outside the image
+    # either greater than the image extent in x,y or
+    # less than zero
+    x_max, y_max = hdul[0].data.shape
+    positions = [pos for pos in positions if pos[0] < x_max and pos[1] < y_max]
+    positions = [pos for pos in positions if pos[0] > 0 and pos[1] > 0]
     # get the apertures from curveofgrowth
     photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
 
@@ -292,5 +330,52 @@ def doPhotometry(ucac4_df, filename):
     aperture_area = np.pi * photAp**2
     # subtract the background
     phot_bkgsub = phot_table["aperture_sum"] - bkg_mean * aperture_area
-    phot_table["aperture_sum_bkgsub"] = phot_bkgsub
+    # convert the aperture sum to magnitudes
+    phot_bkgsub = -2.5 * np.log10(phot_bkgsub)
+    #drop the column with the aperture sum
+    phot_table.remove_column("aperture_sum")
+    # add the column with the aperture sum with background
+    phot_table["inst_mag"] = phot_bkgsub
+    # convert the astropy table to a pandas dataframe
+    phot_table = phot_table.to_pandas()
     return phot_table
+
+def examine_zeropoint(ucac4, phot, photband='f.mag', iplots=False):
+    """
+    a function to examine the zeropoint of the photometry
+
+    use the iplots flag to generate plots
+    """
+    # join the ucac4 and phot dataframes on the ucac4.x and phot.xcenter
+    # columns
+    merged = pd.merge(ucac4, phot, left_on="x", right_on="xcenter")
+    # find the number of rows with valid f.mag
+    # and valid inst_mag
+    nvalidfmag = len(merged.dropna(subset=["f.mag", "inst_mag"]))
+    # and for Vmag
+    nvalidVmag = len(merged.dropna(subset=["Vmag", "inst_mag"]))
+    # and for Jmag  
+    nvalidJmag = len(merged.dropna(subset=["Jmag", "inst_mag"]))
+    logger.info(f"Number of rows with valid f.mag: {nvalidfmag}")
+    logger.info(f"Number of rows with valid Vmag: {nvalidVmag}")
+    logger.info(f"Number of rows with valid Jmag: {nvalidJmag}")
+    logger.info(f"The requested photband is: {photband}")
+    # calculate the zeropoint
+    merged['zeropoint'] = merged[photband] - merged["inst_mag"]
+    if iplots:
+        # use matplotlib to create a png plot of merged["Vmag"] vs zeropoint
+        plt.scatter(merged[photband], merged["inst_mag"])
+        plt.xlabel(f"UCAC4 {photband}")
+        plt.ylabel("Instrumental Magnitude")
+        plt.savefig("comparePhot.png")
+        plt.close()
+        # and also generate a plot of zeropoint vs Vmag
+        plt.scatter(merged[photband], merged["zeropoint"])
+        plt.xlabel(f"UCAC4 {photband}")
+        plt.ylabel("Zeropoint")
+        plt.savefig("zeropoint.png")
+        plt.close()
+    # return the zeropoint
+    # keep only columns x,y, xcenter, ycenter
+    # merged = merged[["x", "y", "xcenter", "ycenter", "f.mag", "inst_mag", "zeropoint"]]   
+    return merged
