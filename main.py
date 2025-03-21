@@ -3,7 +3,7 @@ from source_library.coreSource import create_logger, getDSSImage
 from source_library.helperFunctions import resolve_coordinates
 from source_library.coreSource import runAstrometry, wcsinfo, getUCAC4Objects,\
     removeBackground, curveOfGrowth, doPhotometry, examine_zeropoint
-from source_library.coreSource import set_logger
+from source_library.coreSource import set_logger, getSMphotometry
 
 logger = create_logger()
 set_logger(logger)
@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
 
 # The photometric properties of the DSS photographic plates are 
-# highly non-linear: basically, a comparison of the magnitudes of ucac4 to
+# highly non-linear: basically, a comparison of the magnitudes of refcat to
 # those derived form the DSS show a general trend of brighter objects having 
 # more counts but the relationship is not linear.
 
@@ -41,18 +41,19 @@ if __name__ == "__main__":
     rtn = wcsinfo(filename)
     logger.info(f"wcsinfo: {rtn}")
 
-    ucac4 = getUCAC4Objects(filename)
-    logger.info(f"UCAC4: {ucac4}")
+    #refcat = getUCAC4Objects(filename)
+    refcat = getSMphotometry(filename)
+    logger.info(f"Reference Catalog: {refcat}")
 
     removeBackground(filename)
     #append _nobkg to the filename
     filename = filename.replace('.fits', '_nobkg.fits')
 
-    curveOfGrowth(ucac4, filename)
+    curveOfGrowth(refcat, filename)
     
 
-    phot_df = doPhotometry(ucac4, filename)  
+    phot_df = doPhotometry(refcat, filename)  
     logger.info(f"Photometry: {phot_df}")
-    merged = examine_zeropoint(ucac4, phot_df, photband='f.mag', iplots=True)
+    merged = examine_zeropoint(refcat, phot_df, photband='gPSF', iplots=True)
     logger.info(f"Merged: {merged}")
     logger.info("Done")

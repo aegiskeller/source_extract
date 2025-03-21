@@ -183,12 +183,12 @@ def getUCAC4Objects(filename):
     result = v.query_region(center_coord, radius=search_radius)
 
     if result:
-        ucac4_table = result[0]
-        ucac4_df = ucac4_table.to_pandas()
+        refcat_table = result[0]
+        refcat_df = refcat_table.to_pandas()
         # drop rows with missing Vmag - too restrictive?
-        # ucac4_df = ucac4_df.dropna(subset=["Vmag"])
+        # refcat_df = refcat_df.dropna(subset=["Vmag"])
         # drop rows with bad object quality
-        ucac4_df = ucac4_df[ucac4_df["of"] == 0]
+        refcat_df = refcat_df[refcat_df["of"] == 0]
         # open the image file to get the WCS information
         try:
             hdul = fits.open(filename)
@@ -198,20 +198,78 @@ def getUCAC4Objects(filename):
             hdul.close()
             return "failed - no WCS info"
         # Create a SkyCoord object for the objects in the catalog
-        ucac4_coords = SkyCoord(
-            ra=ucac4_df["RAJ2000"],
-            dec=ucac4_df["DEJ2000"],
+        refcat_coords = SkyCoord(
+            ra=refcat_df["RAJ2000"],
+            dec=refcat_df["DEJ2000"],
             unit=(u.deg, u.deg),
             frame="icrs",
         )
         # Project the coordinates to the image
-        x, y = wcs.world_to_pixel(ucac4_coords)
-        ucac4_df["x"] = x
-        ucac4_df["y"] = y
-        return ucac4_df
+        x, y = wcs.world_to_pixel(refcat_coords)
+        refcat_df["x"] = x
+        refcat_df["y"] = y
+        return refcat_df
     else:
         return "No objects found"
 
+def getSMphotometry(filename):
+    """
+    a function that searches for photometry from SkyMapper
+    for objects contained in the image 'filename'
+    """
+    # get the wcs information from the image
+    try:
+        ra_center, dec_center, pixscale, orientation, fieldw, fieldh, fieldunits = (
+            wcsinfo(filename)
+        )
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return "failed - no wcs info"
+
+    # Create a SkyCoord object for the center of the field
+    center_coord = SkyCoord(
+        ra=ra_center, dec=dec_center, unit=(u.deg, u.deg), frame="icrs"
+    )
+
+    # Define the search radius
+    search_radius = max(float(fieldw), float(fieldh)) / 2 * u.arcmin
+
+    # Query the SkyMapper catalog
+    # set the number of rows obtained by the Vizier query to infinite
+
+    v = Vizier(columns=["*"], catalog="II/379")
+    v.ROW_LIMIT = -1
+    result = v.query_region(center_coord, radius=search_radius)
+
+    if result:
+        sm_table = result[0]
+        sm_df = sm_table.to_pandas()
+#     # ['SMSS', 'RAICRS', 'DEICRS', 'ObjectId', 'e_RAICRS', 'e_DEICRS',
+#        'EpMean', 'flags', 'ClassStar', 'RadrPetro', 'uPSF', 'uPetro', 'vPSF',
+#        'vPetro', 'gPSF', 'gPetro', 'rPSF', 'rPetro', 'iPSF', 'iPetro', 'zPSF',
+#        'zPetro']
+#     # open the image file to get the WCS information
+        try:
+            hdul = fits.open(filename)
+            wcs = WCS(hdul[0].header)
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            hdul.close()
+            return "failed - no WCS info"
+        # Create a SkyCoord object for the objects in the catalog
+        sm_coords = SkyCoord(
+            ra=sm_df["RAICRS"],
+            dec=sm_df["DEICRS"],
+            unit=(u.deg, u.deg),
+            frame="icrs",
+        )
+        # Project the coordinates to the image
+        x, y = wcs.world_to_pixel(sm_coords)
+        sm_df["x"] = x
+        sm_df["y"] = y
+        return sm_df
+    else:
+        return "No objects found"
 
 def removeBackground(filename):
     """
@@ -242,14 +300,18 @@ def removeBackground(filename):
 
 
 # create a function to perform curve of growth analysis
-def curveOfGrowth(ucac4_df, filename):
+def curveOfGrowth(refcat_df, filename):
     """
-    a function to project the ra,dec of ucac4_df to the image
+    a function to project the ra,dec of refcat_df to the image
     coordinates (x,y) and perform curve of growth analysis
     """
-    # generate an aperture for each object in ucac4_df[x,y]
-    x = ucac4_df["x"]
-    y = ucac4_df["y"]
+    # generate an aperture for each object in refcat_df[x,y]
+    # if that object has a gPSF magnitude < 16
+    # filter the df
+    refcat_df = refcat_df[refcat_df["gPSF"] < 16]
+
+    x = refcat_df["x"]
+    y = refcat_df["y"]
     hdul = fits.open(filename)
     # check that hdul[0].data is not None
     if hdul[0].data is None:
@@ -287,9 +349,9 @@ def curveOfGrowth(ucac4_df, filename):
     return photAp, skyApInner, skyApOuter
 
 
-def doPhotometry(ucac4_df, filename):
+def doPhotometry(refcat_df, filename):
     """
-    a function to project the ra,dec of ucac4_df to the image
+    a function to project the ra,dec of refcat_df to the image
     coordinates (x,y) and perform aperture photometry
     """
     # open the image file to get the WCS information
@@ -303,10 +365,10 @@ def doPhotometry(ucac4_df, filename):
         return "failed - no WCS info"
 
     # use the curveofgrowth function to determine the best apertures
-    photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
+    photAp, skyApInner, skyApOuter = curveOfGrowth(refcat_df, filename)
 
     # Project the coordinates to the image
-    x, y = ucac4_df["x"], ucac4_df["y"]
+    x, y = refcat_df["x"], refcat_df["y"]
     # generate an aperture for each object
     positions = list(zip(x, y))
     # screen out objects with x,y outside the image
@@ -316,7 +378,7 @@ def doPhotometry(ucac4_df, filename):
     positions = [pos for pos in positions if pos[0] < x_max and pos[1] < y_max]
     positions = [pos for pos in positions if pos[0] > 0 and pos[1] > 0]
     # get the apertures from curveofgrowth
-    photAp, skyApInner, skyApOuter = curveOfGrowth(ucac4_df, filename)
+    photAp, skyApInner, skyApOuter = curveOfGrowth(refcat_df, filename)
 
     apertures = CircularAperture(positions, r=photAp)
     # use a circular annulus for the background
@@ -340,28 +402,46 @@ def doPhotometry(ucac4_df, filename):
     phot_table = phot_table.to_pandas()
     return phot_table
 
-def examine_zeropoint(ucac4, phot, photband='f.mag', iplots=False):
+def examine_zeropoint(refcat, phot, photband='gPSF', iplots=False):
     """
     a function to examine the zeropoint of the photometry
 
     use the iplots flag to generate plots
     """
-    # join the ucac4 and phot dataframes on the ucac4.x and phot.xcenter
+    # join the refcat and phot dataframes on the refcat.x and phot.xcenter
     # columns
-    merged = pd.merge(ucac4, phot, left_on="x", right_on="xcenter")
+    merged = pd.merge(refcat, phot, left_on="x", right_on="xcenter")
     # find the number of rows with valid f.mag
     # and valid inst_mag
-    nvalidfmag = len(merged.dropna(subset=["f.mag", "inst_mag"]))
+    nvalidfmag = len(merged.dropna(subset=["gPSF", "inst_mag"]))
     # and for Vmag
-    nvalidVmag = len(merged.dropna(subset=["Vmag", "inst_mag"]))
+ #   nvalidVmag = len(merged.dropna(subset=["Vmag", "inst_mag"]))
     # and for Jmag  
-    nvalidJmag = len(merged.dropna(subset=["Jmag", "inst_mag"]))
-    logger.info(f"Number of rows with valid f.mag: {nvalidfmag}")
-    logger.info(f"Number of rows with valid Vmag: {nvalidVmag}")
-    logger.info(f"Number of rows with valid Jmag: {nvalidJmag}")
+ #   nvalidJmag = len(merged.dropna(subset=["Jmag", "inst_mag"]))
+    logger.info(f"Number of rows with valid gPSF: {nvalidfmag}")
+    # logger.info(f"Number of rows with valid Vmag: {nvalidVmag}")
+    # logger.info(f"Number of rows with valid Jmag: {nvalidJmag}")
     logger.info(f"The requested photband is: {photband}")
     # calculate the zeropoint
     merged['zeropoint'] = merged[photband] - merged["inst_mag"]
+    # determine the min max of gPSF
+    min_gPSF = merged["gPSF"].min()+1
+    max_gPSF = min_gPSF+3
+    # clip the merged dataframe to remove rows between min_gPSF and max_gPSF
+    merged = merged[(merged["gPSF"] > min_gPSF) & (merged["gPSF"] < max_gPSF)]
+    #remove objects with ClassStar < 0.9
+    merged = merged[merged["ClassStar"] > 0.9]
+    # now perform median clipping on the zeropoint
+    # to remove outliers
+    zeropoint = merged["zeropoint"]
+    # perform iloops of median clipping
+    for i in range(9):
+        median = zeropoint.median()
+        std = zeropoint.std()
+        # clip the zeropoint
+        zeropoint = zeropoint[(zeropoint > median - 2 * std) & (zeropoint < median + 2 * std)]
+    # calculate the zeropoint
+    zeropoint = zeropoint.median()
     if iplots:
         # use matplotlib to create a png plot of merged["Vmag"] vs zeropoint
         plt.scatter(merged[photband], merged["inst_mag"])
@@ -370,7 +450,9 @@ def examine_zeropoint(ucac4, phot, photband='f.mag', iplots=False):
         plt.savefig("comparePhot.png")
         plt.close()
         # and also generate a plot of zeropoint vs Vmag
+        # overlay a line at the zeropoint
         plt.scatter(merged[photband], merged["zeropoint"])
+        plt.axhline(y=zeropoint, color='r', linestyle='--')
         plt.xlabel(f"UCAC4 {photband}")
         plt.ylabel("Zeropoint")
         plt.savefig("zeropoint.png")
@@ -378,4 +460,4 @@ def examine_zeropoint(ucac4, phot, photband='f.mag', iplots=False):
     # return the zeropoint
     # keep only columns x,y, xcenter, ycenter
     # merged = merged[["x", "y", "xcenter", "ycenter", "f.mag", "inst_mag", "zeropoint"]]   
-    return merged
+    return zeropoint
